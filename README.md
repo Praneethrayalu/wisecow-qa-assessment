@@ -141,8 +141,8 @@ The GitHub Actions workflow has **not** run on GitHub yet (repo not pushed when 
 ## 8. CI/CD (GitHub Actions)
 
 `static-and-unit` (shellcheck, py_compile, `pytest -m "unit or static"` with kubeconform, JUnit artifact) →
-`qa-tests` (build the image, `pytest -m "live or docker"` with `WISECOW_REQUIRE_LIVE=1`, JUnit artifact) → `push` (main only; pushes **the tested image** as
-`sha-<commit>` and `latest`, records the digest) → `deploy` (only when `DEPLOY_ENABLED=true`; checks
+`qa-tests` (build the image, `pytest -m "live or docker"` with `WISECOW_REQUIRE_LIVE=1`, JUnit artifact) → `push` (main only; pushes **the tested image** to
+`ghcr.io/<owner>/wisecow-qa` as `sha-<commit>` and `latest`, records the digest) → `deploy` (only when `DEPLOY_ENABLED=true`; checks
 `KUBE_CONFIG`, `kubectl apply -k k8s`, `set image ...@sha256:<digest>`, waits for rollout, rolls back on
 failure, verifies with the health checker and the smoke test). Pull requests run the two test jobs only. Ingress/TLS tests need a cluster and are run against one
 (kind here), not in CI.

@@ -35,7 +35,7 @@ spec:
         - name: wisecow
           # The deploy job replaces this with the immutable digest it just built
           # (kubectl set image ...@sha256:...). The tag here is only for manual installs.
-          image: ghcr.io/praneethrayalu/wisecow:latest
+          image: ghcr.io/praneethrayalu/wisecow-qa:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

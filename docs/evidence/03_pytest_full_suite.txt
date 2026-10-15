@@ -1,8 +1,8 @@
 # captured 2026-10-15 11:07 UTC on the test machine (Debian 12, Docker, kind v1.32 cluster)
 $ WISECOW_IMAGE=ghcr.io/praneethrayalu/wisecow:final WISECOW_REQUIRE_LIVE=1 WISECOW_REQUIRE_CLUSTER=1 WISECOW_TLS_URL=https://wisecow.local:8443 WISECOW_CA_CERT=/tmp/wisecow-ca.crt WISECOW_HTTP_INGRESS_URL=http://wisecow.local:8080 KUBECTL='sudo kubectl' DOCKER='sudo docker' python -m pytest -v --junitxml=docs/evidence/junit-full.xml   (fresh venv from tests/requirements.txt)
 ============================= test session starts ==============================
-platform linux -- Python 3.11.6, pytest-8.3.3, pluggy-1.7.0 -- /home/user/tab/tasks/fd13f4a8-4276-41b2-b822-aad1fc23d632/work/venv-qa/bin/python
-rootdir: /home/user/tab/files/accuknox/qa/repo
+platform linux -- Python 3.11.6, pytest-8.3.3, pluggy-1.7.0 -- python
+rootdir: .
 configfile: pytest.ini
 testpaths: tests
 plugins: timeout-2.3.1
@@ -113,6 +113,6 @@ tests/test_tls_ingress.py::test_http_redirects_to_https PASSED           [ 98%]
 tests/test_tls_ingress.py::test_burst_through_ingress PASSED             [ 99%]
 tests/test_tls_ingress.py::test_live_deployment_healthy_and_hardened PASSED [100%]
 
-- generated xml file: /home/user/tab/files/accuknox/qa/repo/docs/evidence/junit-full.xml -
+- generated xml file: docs/evidence/junit-full.xml -
 ============================= 101 passed in 52.88s =============================
 # exit code: 0

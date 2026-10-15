@@ -1,8 +1,15 @@
-"""Unit tests for the Problem Statement 2 scripts (no cluster needed)."""
+"""Tests for the PS2 ops scripts (TC-46 .. TC-68): success paths and the failure paths that matter in operations
+(unreachable service, HTTP errors, timeouts, bad arguments, unreadable files, malformed logs).
+
+Only the Python standard library + pytest are needed. Local HTTP servers are started on free
+ports and always shut down in fixture teardown.
+"""
 import gzip
 import http.server
-import importlib.util
 import json
+import os
+import pathlib
+import socket
 import subprocess
 import sys
 import threading
@@ -10,132 +17,254 @@ import time
 
 import pytest
 
-from conftest import REPO
-
+REPO = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+import app_health_checker as ahc  # noqa: E402
+import log_analyzer as la  # noqa: E402
+
+PY = sys.executable
+pytestmark = pytest.mark.unit
 
 
-def load(name):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+def run(*args, timeout=60, **kw):
+    return subprocess.run(list(args), capture_output=True, text=True, timeout=timeout, **kw)
 
 
-log_analyzer = load("log_analyzer")
-health = load("app_health_checker")
+# ---------------------------------------------------------------- fixtures
+class _Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 (http.server naming)
+        if self.path.startswith("/slow"):
+            time.sleep(3)
+        code = {"/ok": 200, "/missing": 404, "/boom": 500}.get(self.path.split("?")[0], 200)
+        body = b"hello"
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
-LOG = [
-    '10.0.0.1 - - [15/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 500 "-" "curl/8.0"',
-    '10.0.0.1 - - [15/Oct/2026:08:00:05 +0000] "GET /about HTTP/1.1" 200 300 "-" "curl/8.0"',
-    '10.0.0.2 - - [15/Oct/2026:08:10:00 +0000] "GET /admin HTTP/1.1" 404 120 "-" "Mozilla/5.0"',
-    '10.0.0.2 - - [15/Oct/2026:09:00:00 +0000] "GET /admin HTTP/1.1" 404 120 "-" "Mozilla/5.0"',
-    '10.0.0.3 - - [15/Oct/2026:09:30:00 +0000] "POST /login HTTP/1.1" 500 - "-" "Mozilla/5.0"',
-    'this line is garbage',
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def server():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    srv.daemon_threads = True
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+    t.join(5)
+
+
+@pytest.fixture
+def closed_port_url():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens here now -> connection refused
+    return f"http://127.0.0.1:{port}"
+
+
+LOG_LINES = [
+    '10.0.0.1 - - [15/Oct/2026:10:00:01 +0000] "GET / HTTP/1.1" 200 512 "-" "curl/8.0"',
+    '10.0.0.1 - - [15/Oct/2026:10:00:02 +0000] "GET /missing HTTP/1.1" 404 10 "-" "curl/8.0"',
+    '10.0.0.2 - - [15/Oct/2026:10:05:00 +0000] "POST /login HTTP/1.1" 500 - "-" "Mozilla/5.0"',
+    '10.0.0.3 - - [15/Oct/2026:11:00:00 +0000] "GET /missing HTTP/1.1" 404 10',      # common format
 ]
 
 
 @pytest.fixture
-def logfile(tmp_path):
+def access_log(tmp_path):
     p = tmp_path / "access.log"
-    p.write_text("\n".join(LOG) + "\n")
+    p.write_text("\n".join(LOG_LINES) + "\n")
     return p
 
 
-# ---------------- log_analyzer.py ----------------
-
-def test_tc26_log_counts(logfile):
-    c = log_analyzer.analyze([str(logfile)])
-    assert c["total"] == 5 and c["unparsed"] == 1
-    assert c["status"]["404"] == 2 and c["status"]["500"] == 1
-    assert c["not_found_pages"].most_common(1) == [("/admin", 2)]
-    assert c["ips"].most_common(1)[0][1] == 2
-    assert c["bytes"] == 500 + 300 + 120 + 120          # "-" size is skipped
-    assert c["methods"]["POST"] == 1
-    assert len(c["hours"]) == 2
+# ---------------------------------------------------------------- app_health_checker.py
+def test_health_up(server):
+    """TC-46: health up."""
+    r = ahc.check_once(server + "/ok", 200, 2)
+    assert r["state"] == "UP" and r["status_code"] == 200 and r["latency_ms"] is not None
 
 
-def test_tc27_log_gzip_and_multiple_files(logfile, tmp_path):
+@pytest.mark.parametrize("path,code", [("/missing", 404), ("/boom", 500)])
+def test_health_http_error_is_down(server, path, code):
+    """TC-47: health http error is down."""
+    r = ahc.check_once(server + path, 200, 2)
+    assert r["state"] == "DOWN" and r["status_code"] == code
+
+
+def test_health_custom_expected_status(server):
+    """TC-48: health custom expected status."""
+    assert ahc.check_once(server + "/missing", 404, 2)["state"] == "UP"
+
+
+def test_health_connection_refused_is_down(closed_port_url):
+    """TC-49: health connection refused is down."""
+    r = ahc.check_once(closed_port_url, 200, 2)
+    assert r["state"] == "DOWN" and "connection error" in r["reason"]
+
+
+def test_health_timeout_is_down(server):
+    """TC-50: health timeout is down."""
+    r = ahc.check_once(server + "/slow", 200, 0.5)
+    assert r["state"] == "DOWN" and "timeout" in r["reason"]
+
+
+def test_health_retries_then_gives_up_without_trailing_sleep(closed_port_url):
+    """TC-51: health retries then gives up without trailing sleep."""
+    sleeps = []
+    r = ahc.check_with_retries(closed_port_url, 200, 1, retries=3, backoff=1, sleep=sleeps.append)
+    assert r["state"] == "DOWN" and r["attempts"] == 3
+    assert sleeps == [1, 2]          # back-off between attempts, none after the last one
+
+
+def test_health_cli_json_stdout_is_pure_json(server, closed_port_url):
+    """TC-52: health cli json stdout is pure json."""
+    p = run(PY, str(SCRIPTS / "app_health_checker.py"), server + "/ok", closed_port_url,
+            "--json", "--retries", "1")
+    assert p.returncode == 1                                   # one URL is DOWN
+    rows = [json.loads(line) for line in p.stdout.splitlines()]  # every stdout line parses
+    assert [r["state"] for r in rows] == ["UP", "DOWN"]
+    assert "DOWN" in p.stderr                                  # human log went to stderr
+
+
+def test_health_cli_exit_zero_when_all_up(server, tmp_path):
+    """TC-53: health cli exit zero when all up."""
+    log = tmp_path / "h.log"
+    p = run(PY, str(SCRIPTS / "app_health_checker.py"), server + "/ok", "--log", str(log))
+    assert p.returncode == 0 and "UP" in log.read_text()
+
+
+@pytest.mark.parametrize("args", [
+    ["--retries", "0"], ["--retries", "x"], ["--timeout", "0"], ["--timeout", "-1"],
+    ["--expect", "999"], ["--interval", "-5"], ["--log", "/nonexistent-dir/x.log"],
+])
+def test_health_cli_rejects_bad_arguments(server, args):
+    """TC-54: health cli rejects bad arguments."""
+    p = run(PY, str(SCRIPTS / "app_health_checker.py"), server + "/ok", *args)
+    assert p.returncode == 2 and "error" in p.stderr
+
+
+@pytest.mark.parametrize("url", ["localhost:8080", "ftp://example.com", "http://"])
+def test_health_cli_rejects_bad_urls(url):
+    """TC-55: health cli rejects bad urls."""
+    p = run(PY, str(SCRIPTS / "app_health_checker.py"), url)
+    assert p.returncode == 2 and "not an http(s) URL" in p.stderr
+
+
+# ---------------------------------------------------------------- log_analyzer.py
+def test_log_counts(access_log):
+    """TC-56: log counts."""
+    s = la.analyze([str(access_log)])
+    assert s["total"] == 4 and s["unparsed"] == 0
+    assert s["status"]["404"] == 2 and s["not_found_pages"]["/missing"] == 2
+    assert s["bytes"] == 512 + 10 + 10 and s["ips"]["10.0.0.1"] == 2
+
+
+def test_log_malformed_lines_are_counted_not_dropped(tmp_path):
+    """TC-57: log malformed lines are counted not dropped."""
+    p = tmp_path / "mixed.log"
+    p.write_text(LOG_LINES[0] + "\nthis is not a log line\n" + '1.2.3.4 - - [x] "GET" 200 1\n\n')
+    s = la.analyze([str(p)])
+    assert s["total"] == 1 and s["unparsed"] == 2   # blank line ignored
+
+
+def test_log_gzip_and_multiple_files(access_log, tmp_path):
+    """TC-58: log gzip and multiple files."""
     gz = tmp_path / "access.log.1.gz"
     with gzip.open(gz, "wt") as fh:
-        fh.write(LOG[0] + "\n")
-    c = log_analyzer.analyze([str(logfile), str(gz)])
-    assert c["total"] == 6 and c["pages"]["/"] == 2
+        fh.write(LOG_LINES[0] + "\n")
+    assert la.analyze([str(access_log), str(gz)])["total"] == 5
 
 
-def test_tc28_log_cli_text_and_json(logfile):
-    out = subprocess.run([sys.executable, SCRIPTS / "log_analyzer.py", logfile],
-                         capture_output=True, text=True, check=True).stdout
-    assert "404 errors     : 2" in out and "/admin" in out
-    js = json.loads(subprocess.run([sys.executable, SCRIPTS / "log_analyzer.py", logfile, "--json", "--top", "1"],
-                                   capture_output=True, text=True, check=True).stdout)
-    assert js["total"] == 5 and js["not_found_pages"] == {"/admin": 2}
+def test_log_cli_json_is_valid(access_log):
+    """TC-59: log cli json is valid."""
+    p = run(PY, str(SCRIPTS / "log_analyzer.py"), str(access_log), "--json", "--top", "1")
+    assert p.returncode == 0
+    out = json.loads(p.stdout)
+    assert out["total"] == 4 and out["not_found"] == 2
+    assert out["top_pages"] == [{"value": "/missing", "count": 2}]
 
 
-def test_tc29_log_empty_file(tmp_path):
-    p = tmp_path / "empty.log"
-    p.write_text("")
-    c = log_analyzer.analyze([str(p)])
-    assert c["total"] == 0 and c["unparsed"] == 0
+def test_log_cli_text_report(access_log):
+    """TC-60: log cli text report."""
+    p = run(PY, str(SCRIPTS / "log_analyzer.py"), str(access_log))
+    assert p.returncode == 0 and "404 errors     : 2" in p.stdout
 
 
-# ---------------- app_health_checker.py ----------------
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/slow":
-            time.sleep(2)
-        code = {"/ok": 200, "/boom": 500, "/slow": 200, "/created": 201}.get(self.path, 404)
-        self.send_response(code)
-        self.end_headers()
-        self.wfile.write(b"hi")
-
-    def log_message(self, *a):
-        pass
+def test_log_cli_all_malformed_exits_1(tmp_path):
+    """TC-61: log cli all malformed exits 1."""
+    p = tmp_path / "junk.log"
+    p.write_text("junk\nmore junk\n")
+    r = run(PY, str(SCRIPTS / "log_analyzer.py"), str(p))
+    assert r.returncode == 1 and "no parseable lines" in r.stderr
 
 
-@pytest.fixture(scope="module")
-def server():
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}"
-    srv.shutdown()
+def test_log_cli_missing_file_exits_2(tmp_path):
+    """TC-62: log cli missing file exits 2."""
+    r = run(PY, str(SCRIPTS / "log_analyzer.py"), str(tmp_path / "nope.log"))
+    assert r.returncode == 2 and "cannot read" in r.stderr and "Traceback" not in r.stderr
 
 
-def test_tc30_health_up(server):
-    r = health.check_once(server + "/ok", 200, 3)
-    assert r["state"] == "UP" and r["status_code"] == 200 and r["latency_ms"] >= 0
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read chmod-000 files")
+def test_log_cli_unreadable_file_exits_2(access_log):
+    """TC-63: log cli unreadable file exits 2."""
+    access_log.chmod(0)
+    try:
+        r = run(PY, str(SCRIPTS / "log_analyzer.py"), str(access_log))
+    finally:
+        access_log.chmod(0o644)
+    assert r.returncode == 2 and "Permission denied" in r.stderr
 
 
-def test_tc31_health_down_on_5xx_and_404(server):
-    assert health.check_once(server + "/boom", 200, 3)["state"] == "DOWN"
-    r = health.check_once(server + "/nope", 200, 3)
-    assert r["state"] == "DOWN" and r["status_code"] == 404
+def test_log_cli_corrupt_gzip_exits_2(tmp_path):
+    """TC-64: log cli corrupt gzip exits 2."""
+    bad = tmp_path / "bad.gz"
+    bad.write_bytes(b"not gzip at all")
+    r = run(PY, str(SCRIPTS / "log_analyzer.py"), str(bad))
+    assert r.returncode == 2 and "Traceback" not in r.stderr
 
 
-def test_tc32_health_custom_expect(server):
-    assert health.check_once(server + "/created", 201, 3)["state"] == "UP"
-    assert health.check_once(server + "/boom", 500, 3)["state"] == "UP"
+def test_log_cli_rejects_bad_top(access_log):
+    """TC-65: log cli rejects bad top."""
+    r = run(PY, str(SCRIPTS / "log_analyzer.py"), str(access_log), "--top", "0")
+    assert r.returncode == 2
 
 
-def test_tc33_health_timeout_and_refused(server):
-    r = health.check_once(server + "/slow", 200, 0.5)
-    assert r["state"] == "DOWN" and "timeout" in r["reason"].lower() or "timed out" in r["reason"].lower()
-    r = health.check_once("http://127.0.0.1:1/", 200, 2)
-    assert r["state"] == "DOWN" and r["status_code"] is None
+# ---------------------------------------------------------------- system_health_monitor.sh
+MON = str(SCRIPTS / "system_health_monitor.sh")
 
 
-def test_tc34_health_retries_then_gives_up(server):
-    t = time.monotonic()
-    r = health.check_with_retries(server + "/boom", 200, 2, retries=3, backoff=0.1)
-    assert r["attempt"] == 3 and r["state"] == "DOWN"
-    assert time.monotonic() - t >= 0.1 + 0.2
+def test_monitor_json_mode_healthy(tmp_path):
+    """TC-66: monitor json mode healthy."""
+    p = run("bash", MON, "-j", "-c", "100", "-m", "100", "-d", "100", "-p", "1000000", "-l", str(tmp_path / "m.log"))
+    assert p.returncode == 0
+    d = json.loads(p.stdout)                  # stdout is exactly one JSON object
+    assert d["status"] == "OK" and d["alerts"] == []
+    assert (tmp_path / "m.log").read_text().count("cpu=") == 1
 
 
-def test_tc35_health_cli_exit_codes(server, tmp_path):
-    cmd = [sys.executable, SCRIPTS / "app_health_checker.py", "--retries", "1", "--log", tmp_path / "h.log"]
-    up = subprocess.run(cmd + [server + "/ok"], capture_output=True, text=True)
-    down = subprocess.run(cmd + [server + "/ok", server + "/boom"], capture_output=True, text=True)
-    assert up.returncode == 0 and "UP" in up.stdout
-    assert down.returncode == 1 and "DOWN" in down.stdout
-    assert "DOWN" in (tmp_path / "h.log").read_text()
+def test_monitor_alert_exit_1(tmp_path):
+    """TC-67: monitor alert exit 1."""
+    p = run("bash", MON, "-j", "-p", "1", "-l", str(tmp_path / "m.log"))   # >1 process always true
+    assert p.returncode == 1
+    d = json.loads(p.stdout)
+    assert d["status"] == "ALERT" and "processes" in d["alerts"]
+    assert "ALERT" in (tmp_path / "m.log").read_text()
+
+
+@pytest.mark.parametrize("args", [["-c", "abc"], ["-m", "0"], ["-d", "101"], ["-p", "-3"],
+                                  ["-i", "1.5"], ["-P", "/no/such/path"], ["-l", "/no/such/dir/x.log"],
+                                  ["-z"], ["extra-arg"]])
+def test_monitor_rejects_bad_arguments(tmp_path, args):
+    """TC-68: monitor rejects bad arguments."""
+    p = run("bash", MON, *args, cwd=tmp_path)
+    assert p.returncode == 2

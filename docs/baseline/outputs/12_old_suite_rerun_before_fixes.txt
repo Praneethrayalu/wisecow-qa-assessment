@@ -1,0 +1,19 @@
+.........xxx......................x                                      [100%]
+=============================== warnings summary ===============================
+tests/test_tls_ingress.py::test_tc13_https_returns_cow
+tests/test_tls_ingress.py::test_tc16_hsts_header_present
+tests/test_tls_ingress.py::test_tc18_ingress_burst_two_replicas
+  /usr/local/lib/python3.11/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'wisecow.local'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+    warnings.warn(
+
+tests/test_tls_ingress.py::test_tc15_old_tls_rejected
+  /home/user/tab/files/accuknox/qa/repo/tests/test_tls_ingress.py:36: DeprecationWarning: ssl.TLSVersion.TLSv1_1 is deprecated
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_1
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+XFAIL tests/test_http_service.py::test_tc10_response_carries_content_type - DEF-02: no Content-Type header (browser has to sniff the body)
+XFAIL tests/test_http_service.py::test_tc11_back_to_back_requests_without_pause - DEF-01 reproduced: [200, 'ConnectionError', 'ConnectionError', 'ConnectionError', 'ConnectionError', 'ConnectionError']
+XFAIL tests/test_http_service.py::test_tc12_concurrent_requests_direct - DEF-01 under concurrency: [200, 'ConnectionError', 'ConnectionError', 'ConnectionError', 200]
+XFAIL tests/test_tls_ingress.py::test_tc18_ingress_burst_two_replicas - DEF-03: 8/20 failed under burst (['200', '502'])
+31 passed, 4 xfailed, 4 warnings in 33.55s

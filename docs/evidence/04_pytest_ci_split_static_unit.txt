@@ -1,0 +1,5 @@
+# captured 2026-10-15 11:07 UTC on the test machine (Debian 12, Docker, kind v1.32 cluster)
+$ python -m pytest -q -m "unit or static"   # what the CI static-and-unit job runs
+.........................................................                [100%]
+57 passed, 44 deselected in 10.18s
+# exit code: 0

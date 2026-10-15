@@ -1,0 +1,52 @@
+$ python3 -m pytest -v   # WISECOW_URL=http://127.0.0.1:18081, WISECOW_TLS_URL=https://wisecow.local:8443
+============================= test session starts ==============================
+platform linux -- Python 3.11.6, pytest-9.1.1, pluggy-1.7.0 -- /usr/local/bin/python3
+rootdir: wisecow-qa-assessment
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.14.2
+collecting ... collected 35 items
+
+tests/test_http_service.py::test_tc01_root_returns_200 PASSED            [  2%]
+tests/test_http_service.py::test_tc02_body_is_wrapped_in_pre PASSED      [  5%]
+tests/test_http_service.py::test_tc03_body_contains_cowsay_art PASSED    [  8%]
+tests/test_http_service.py::test_tc04_speech_bubble_is_not_empty PASSED  [ 11%]
+tests/test_http_service.py::test_tc05_fortunes_vary_between_requests PASSED [ 14%]
+tests/test_http_service.py::test_tc06_any_path_is_served PASSED          [ 17%]
+tests/test_http_service.py::test_tc07_head_and_post_answer PASSED        [ 20%]
+tests/test_http_service.py::test_tc08_latency_under_budget PASSED        [ 22%]
+tests/test_http_service.py::test_tc09_paced_sequential_requests_all_succeed PASSED [ 25%]
+tests/test_http_service.py::test_tc10_response_carries_content_type XFAIL [ 28%]
+tests/test_http_service.py::test_tc11_back_to_back_requests_without_pause XFAIL [ 31%]
+tests/test_http_service.py::test_tc12_concurrent_requests_direct XFAIL   [ 34%]
+tests/test_scripts.py::test_tc26_log_counts PASSED                       [ 37%]
+tests/test_scripts.py::test_tc27_log_gzip_and_multiple_files PASSED      [ 40%]
+tests/test_scripts.py::test_tc28_log_cli_text_and_json PASSED            [ 42%]
+tests/test_scripts.py::test_tc29_log_empty_file PASSED                   [ 45%]
+tests/test_scripts.py::test_tc30_health_up PASSED                        [ 48%]
+tests/test_scripts.py::test_tc31_health_down_on_5xx_and_404 PASSED       [ 51%]
+tests/test_scripts.py::test_tc32_health_custom_expect PASSED             [ 54%]
+tests/test_scripts.py::test_tc33_health_timeout_and_refused PASSED       [ 57%]
+tests/test_scripts.py::test_tc34_health_retries_then_gives_up PASSED     [ 60%]
+tests/test_scripts.py::test_tc35_health_cli_exit_codes PASSED            [ 62%]
+tests/test_static_config.py::test_tc19_dockerfile_hardening PASSED       [ 65%]
+tests/test_static_config.py::test_tc20_manifests_parse_and_cover_required_kinds PASSED [ 68%]
+tests/test_static_config.py::test_tc21_deployment_is_production_shaped PASSED [ 71%]
+tests/test_static_config.py::test_tc22_service_selector_matches_pods PASSED [ 74%]
+tests/test_static_config.py::test_tc23_ingress_tls_wired_to_certificate PASSED [ 77%]
+tests/test_static_config.py::test_tc24_workflow_build_push_deploy PASSED [ 80%]
+tests/test_static_config.py::test_tc25_kubectl_client_dry_run PASSED     [ 82%]
+tests/test_tls_ingress.py::test_tc13_https_returns_cow PASSED            [ 85%]
+tests/test_tls_ingress.py::test_tc14_tls_version_is_modern PASSED        [ 88%]
+tests/test_tls_ingress.py::test_tc15_old_tls_rejected PASSED             [ 91%]
+tests/test_tls_ingress.py::test_tc16_hsts_header_present PASSED          [ 94%]
+tests/test_tls_ingress.py::test_tc17_http_redirects_to_https PASSED      [ 97%]
+tests/test_tls_ingress.py::test_tc18_ingress_burst_two_replicas XFAIL    [100%]
+
+- generated xml file: wisecow-qa-assessment/docs/outputs/11_pytest_junit.xml -
+=========================== short test summary info ============================
+XFAIL tests/test_http_service.py::test_tc10_response_carries_content_type - DEF-02: no Content-Type header (browser has to sniff the body)
+XFAIL tests/test_http_service.py::test_tc11_back_to_back_requests_without_pause - DEF-01 reproduced: [200, 'ConnectionError', 'ConnectionError', 'ConnectionError', 'ConnectionError', 'ConnectionError']
+XFAIL tests/test_http_service.py::test_tc12_concurrent_requests_direct - DEF-01 under concurrency: [200, 'ConnectionError', 'ConnectionError', 'ConnectionError', 200]
+XFAIL tests/test_tls_ingress.py::test_tc18_ingress_burst_two_replicas - DEF-03: 8/20 failed under burst (['200', '502'])
+======================== 31 passed, 4 xfailed in 33.19s ========================

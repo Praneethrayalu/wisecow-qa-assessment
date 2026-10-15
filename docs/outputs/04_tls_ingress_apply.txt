@@ -1,0 +1,12 @@
+clusterissuer.cert-manager.io/wisecow-selfsigned created
+certificate.cert-manager.io/wisecow-tls created
+ingress.networking.k8s.io/wisecow created
+$ kubectl -n wisecow get certificate,secret,ingress
+NAME                                      READY   SECRET        AGE
+certificate.cert-manager.io/wisecow-tls   True    wisecow-tls   44s
+
+NAME                 TYPE                DATA   AGE
+secret/wisecow-tls   kubernetes.io/tls   3      44s
+
+NAME                                CLASS   HOSTS           ADDRESS   PORTS     AGE
+ingress.networking.k8s.io/wisecow   nginx   wisecow.local             80, 443   8s

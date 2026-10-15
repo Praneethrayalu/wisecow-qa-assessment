@@ -1,0 +1,15 @@
+$ actionlint .github/workflows/ci-cd.yaml
+actionlint: no issues (rc=0)
+
+$ shellcheck -S warning wisecow.sh scripts/*.sh k8s/tls/*.sh
+shellcheck: no warnings (rc=0)
+
+$ kubeconform -strict -ignore-missing-schemas -summary k8s/*.yaml
+Summary: 6 resources found in 5 files - Valid: 5, Invalid: 0, Errors: 0, Skipped: 1
+
+$ kubectl apply --dry-run=client -k k8s
+namespace/wisecow configured (dry run)
+service/wisecow unchanged (dry run)
+service/wisecow-nodeport unchanged (dry run)
+deployment.apps/wisecow unchanged (dry run)
+ingress.networking.k8s.io/wisecow unchanged (dry run)
